@@ -1,0 +1,39 @@
+# Secrets — never commit
+secrets.txt
+.env
+*.env
+
+# Large output / data dirs
+output/
+malsm_pdfs/
+tparents_pdfs/
+data/
+
+# Large binary files
+*.zip
+*.pdf
+
+# Lambda build artifacts
+/tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.env
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
