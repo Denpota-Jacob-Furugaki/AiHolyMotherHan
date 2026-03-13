@@ -1,0 +1,236 @@
+{
+  "glossary_version": "1.0",
+  "description": "Theological terminology mapping for Divine Principle and True Parents' Word Collection",
+  "terms": {
+    "physical_world": {
+      "korean": ["지상", "지상세계", "육계", "물질세계", "현실세계"],
+      "english": ["physical world", "corporeal world", "earthly world", "material world", "earth"],
+      "japanese": ["地上", "地上世界", "肉界", "物質世界"],
+      "divine_principle_term": "physical world",
+      "context": "The visible, material realm where humans live in physical bodies",
+      "related_terms": ["spiritual world", "creation"]
+    },
+    "spiritual_world": {
+      "korean": ["영계", "영적세계", "천상", "천상세계", "영원한 세계"],
+      "english": ["spiritual world", "spirit world", "heavenly world", "eternal world", "heaven"],
+      "japanese": ["霊界", "霊的世界", "天上", "天上世界"],
+      "divine_principle_term": "spiritual world",
+      "context": "The invisible, eternal realm where spirits dwell after physical death",
+      "related_terms": ["physical world", "paradise", "hell"]
+    },
+    "true_love": {
+      "korean": ["참사랑", "진정한 사랑", "하나님의 사랑"],
+      "english": ["True Love", "true love", "God's love"],
+      "japanese": ["真の愛", "真実の愛", "神様の愛"],
+      "divine_principle_term": "True Love",
+      "context": "Absolute, unchanging, sacrificial love centered on God",
+      "related_terms": ["True Parents", "True Family"]
+    },
+    "true_parents": {
+      "korean": ["참부모", "참부모님", "진정한 부모"],
+      "english": ["True Parents", "True Father and True Mother"],
+      "japanese": ["真の父母", "真の父母様"],
+      "divine_principle_term": "True Parents",
+      "context": "Rev. Sun Myung Moon and Dr. Hak Ja Han Moon as the first couple to achieve perfection",
+      "related_terms": ["True Love", "True Family", "Messiah"]
+    },
+    "true_father": {
+      "korean": ["참아버님", "참아버지", "문선명 총재"],
+      "english": ["True Father", "Rev. Sun Myung Moon", "Father Moon"],
+      "japanese": ["真のお父様", "文鮮明総裁"],
+      "divine_principle_term": "True Father",
+      "context": "Rev. Sun Myung Moon",
+      "related_terms": ["True Parents", "True Mother"]
+    },
+    "true_mother": {
+      "korean": ["참어머님", "참어머니", "한학자 총재"],
+      "english": ["True Mother", "Dr. Hak Ja Han Moon", "Mother Moon"],
+      "japanese": ["真のお母様", "韓鶴子総裁"],
+      "divine_principle_term": "True Mother",
+      "context": "Dr. Hak Ja Han Moon",
+      "related_terms": ["True Parents", "True Father"]
+    },
+    "messiah": {
+      "korean": ["메시아", "구세주", "재림주"],
+      "english": ["Messiah", "Savior", "Lord of the Second Advent"],
+      "japanese": ["メシア", "救世主", "再臨主"],
+      "divine_principle_term": "Messiah",
+      "context": "The anointed one sent by God to save humanity",
+      "related_terms": ["True Parents", "Second Coming"]
+    },
+    "restoration": {
+      "korean": ["복귀", "회복", "탕감복귀"],
+      "english": ["restoration", "restoration through indemnity", "recovery"],
+      "japanese": ["復帰", "回復", "蕩減復帰"],
+      "divine_principle_term": "restoration",
+      "context": "The process of returning to God's original ideal",
+      "related_terms": ["indemnity", "providence"]
+    },
+    "indemnity": {
+      "korean": ["탕감", "배상", "속죄"],
+      "english": ["indemnity", "restitution", "atonement"],
+      "japanese": ["蕩減", "賠償", "贖罪"],
+      "divine_principle_term": "indemnity",
+      "context": "Conditions paid to restore what was lost through the Fall",
+      "related_terms": ["restoration", "providence"]
+    },
+    "fall": {
+      "korean": ["타락", "인간타락", "원죄"],
+      "english": ["Fall", "Human Fall", "original sin"],
+      "japanese": ["堕落", "人間堕落", "原罪"],
+      "divine_principle_term": "Fall",
+      "context": "The spiritual and physical corruption of Adam and Eve",
+      "related_terms": ["original sin", "Satan", "restoration"]
+    },
+    "original_sin": {
+      "korean": ["원죄", "타락의 죄"],
+      "english": ["original sin", "sin of the Fall"],
+      "japanese": ["原罪", "堕落の罪"],
+      "divine_principle_term": "original sin",
+      "context": "The fundamental sin inherited from Adam and Eve's Fall",
+      "related_terms": ["Fall", "Satan", "restoration"]
+    },
+    "satan": {
+      "korean": ["사탄", "마귀", "악마", "루시퍼"],
+      "english": ["Satan", "devil", "Lucifer", "evil one"],
+      "japanese": ["サタン", "悪魔", "ルシファー"],
+      "divine_principle_term": "Satan",
+      "context": "The fallen archangel who caused the Fall",
+      "related_terms": ["Fall", "archangel", "evil"]
+    },
+    "providence": {
+      "korean": ["섭리", "하나님의 섭리", "구원섭리"],
+      "english": ["providence", "God's providence", "providence of salvation"],
+      "japanese": ["摂理", "神様の摂理", "救援摂理"],
+      "divine_principle_term": "providence",
+      "context": "God's plan and work to restore humanity",
+      "related_terms": ["restoration", "salvation"]
+    },
+    "four_position_foundation": {
+      "korean": ["사위기대", "4위기대"],
+      "english": ["four position foundation", "four-position foundation"],
+      "japanese": ["四位基台"],
+      "divine_principle_term": "four position foundation",
+      "context": "The fundamental structure of God's creation: God, subject, object, and their union",
+      "related_terms": ["give and take", "trinity"]
+    },
+    "give_and_take": {
+      "korean": ["수수작용", "주고받는 작용", "상대기준"],
+      "english": ["give and take action", "give-and-receive action", "reciprocal relationship"],
+      "japanese": ["授受作用", "相対基準"],
+      "divine_principle_term": "give and take action",
+      "context": "The dynamic interaction between subject and object that generates energy",
+      "related_terms": ["four position foundation", "subject and object"]
+    },
+    "central_figure": {
+      "korean": ["중심인물", "중심자"],
+      "english": ["central figure", "central person"],
+      "japanese": ["中心人物"],
+      "divine_principle_term": "central figure",
+      "context": "The person responsible for fulfilling God's will in a particular dispensation",
+      "related_terms": ["providence", "mission"]
+    },
+    "blessing": {
+      "korean": ["축복", "축복결혼", "성혼식"],
+      "english": ["Blessing", "Holy Marriage Blessing", "Marriage Blessing"],
+      "japanese": ["祝福", "祝福結婚", "聖婚式"],
+      "divine_principle_term": "Blessing",
+      "context": "The sacred marriage ceremony conducted by True Parents",
+      "related_terms": ["True Parents", "True Family"]
+    },
+    "true_family": {
+      "korean": ["참가정", "진정한 가정"],
+      "english": ["True Family", "ideal family"],
+      "japanese": ["真の家庭", "理想家庭"],
+      "divine_principle_term": "True Family",
+      "context": "A family centered on God and True Love",
+      "related_terms": ["True Parents", "Blessing"]
+    },
+    "cheon_il_guk": {
+      "korean": ["천일국", "하늘나라"],
+      "english": ["Cheon Il Guk", "Kingdom of Heaven", "God's Kingdom"],
+      "japanese": ["天一国", "天の国"],
+      "divine_principle_term": "Cheon Il Guk",
+      "context": "The Kingdom of Heaven on Earth and in Heaven",
+      "related_terms": ["Kingdom of Heaven", "ideal world"]
+    },
+    "foundation_of_faith": {
+      "korean": ["믿음의 기대", "신앙기대"],
+      "english": ["foundation of faith"],
+      "japanese": ["信仰基台"],
+      "divine_principle_term": "foundation of faith",
+      "context": "The condition to restore faith lost through the Fall",
+      "related_terms": ["foundation of substance", "restoration"]
+    },
+    "foundation_of_substance": {
+      "korean": ["실체기대", "실체의 기대"],
+      "english": ["foundation of substance"],
+      "japanese": ["実体基台"],
+      "divine_principle_term": "foundation of substance",
+      "context": "The condition to restore the proper relationship between Cain and Abel",
+      "related_terms": ["foundation of faith", "Cain and Abel"]
+    },
+    "cain_and_abel": {
+      "korean": ["가인과 아벨", "가인 아벨"],
+      "english": ["Cain and Abel", "Cain-Abel relationship"],
+      "japanese": ["カインとアベル", "カイン・アベル"],
+      "divine_principle_term": "Cain and Abel",
+      "context": "The archetypal relationship between elder and younger, evil and good",
+      "related_terms": ["foundation of substance", "restoration"]
+    },
+    "heart": {
+      "korean": ["심정", "마음", "하나님의 심정"],
+      "english": ["heart", "shimjeong", "God's heart"],
+      "japanese": ["心情", "心", "神様の心情"],
+      "divine_principle_term": "heart (shimjeong)",
+      "context": "The emotional impulse to love, the core of God's being",
+      "related_terms": ["True Love", "God"]
+    },
+    "heavenly_father": {
+      "korean": ["하늘부모님", "하나님", "천부", "아버지"],
+      "english": ["Heavenly Father", "Heavenly Parent", "God", "Father"],
+      "japanese": ["天の父母様", "神様", "天父", "お父様"],
+      "divine_principle_term": "Heavenly Parent",
+      "context": "God as the loving parent of humanity",
+      "related_terms": ["God", "True Parents"]
+    },
+    "original_nature": {
+      "korean": ["본성", "본연의 성품", "원래의 성품"],
+      "english": ["original nature", "original mind", "original character"],
+      "japanese": ["本性", "本然の性稟"],
+      "divine_principle_term": "original nature",
+      "context": "The God-given nature humans possessed before the Fall",
+      "related_terms": ["Fall", "restoration"]
+    },
+    "second_coming": {
+      "korean": ["재림", "재림주", "주님의 재림"],
+      "english": ["Second Coming", "Second Advent", "Lord of the Second Advent"],
+      "japanese": ["再臨", "再臨主"],
+      "divine_principle_term": "Second Coming",
+      "context": "The return of Christ in the Last Days",
+      "related_terms": ["Messiah", "Last Days"]
+    },
+    "last_days": {
+      "korean": ["말세", "종말", "말일"],
+      "english": ["Last Days", "end times", "latter days"],
+      "japanese": ["末世", "終末", "末日"],
+      "divine_principle_term": "Last Days",
+      "context": "The time when the old world ends and God's Kingdom begins",
+      "related_terms": ["Second Coming", "providence"]
+    },
+    "principle": {
+      "korean": ["원리", "천리", "하늘의 원리"],
+      "english": ["Principle", "Divine Principle", "Heavenly Principle"],
+      "japanese": ["原理", "天理"],
+      "divine_principle_term": "Principle",
+      "context": "The fundamental laws governing God's creation and providence",
+      "related_terms": ["Divine Principle", "truth"]
+    }
+  },
+  "usage_notes": {
+    "capitalization": "Terms like 'True Parents', 'True Love', 'Blessing', 'Fall', 'Messiah' are capitalized when referring to theological concepts",
+    "context_sensitivity": "Some terms have different meanings in different contexts (e.g., 'earth' as planet vs. 'physical world')",
+    "translation_priority": "When multiple Korean terms map to one English term, use context to determine the most appropriate translation",
+    "consistency": "Maintain consistent terminology throughout translations to preserve theological accuracy"
+  }
+}
