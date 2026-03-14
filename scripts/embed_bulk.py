@@ -30,8 +30,8 @@ import urllib.request
 
 LAMBDA_FUNCTION = "mini-han-chat"
 EMBED_BATCH = 100        # texts per OpenAI call
-INSERT_BATCH = 100       # pre-embedded chunks per Lambda call
-SLEEP_BETWEEN = 0.1      # seconds between Lambda calls
+INSERT_BATCH = 30        # pre-embedded chunks per Lambda call
+SLEEP_BETWEEN = 0.05     # seconds between Lambda calls
 OPENAI_SECRET_ARN = "arn:aws:secretsmanager:ap-northeast-1:221646756615:secret:rag/openai-api-key-4Mrj6W"
 EMBEDDING_MODEL = "text-embedding-3-small"
 PROGRESS_FILE = "output/embed_bulk_progress.json"
@@ -68,7 +68,11 @@ def invoke_insert(client, chunks: list) -> dict:
         ensure_ascii=False,
     ).encode()
     resp = client.invoke(FunctionName=LAMBDA_FUNCTION, InvocationType="RequestResponse", Payload=payload)
+    fn_error = resp.get("FunctionError")
     result = json.loads(resp["Payload"].read())
+    if fn_error:
+        err_msg = result.get("errorMessage", str(result))
+        raise RuntimeError(f"Lambda FunctionError: {err_msg[:200]}")
     body = result.get("body", "{}")
     return json.loads(body) if isinstance(body, str) else body
 
@@ -141,8 +145,18 @@ def process_dir(src_dir: str, openai_key: str, lambda_client) -> tuple:
     file_buffer = []  # files currently contributing to buffer
     for idx, path in enumerate(pending, 1):
         fname = os.path.basename(path)
-        with open(path, encoding="utf-8") as f:
-            chunks = [json.loads(line) for line in f if line.strip()]
+        chunks = None
+        for _r in range(3):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    chunks = [json.loads(line) for line in f if line.strip()]
+                break
+            except Exception as _e:
+                if _r == 2:
+                    print(f"  [read] SKIP {fname}: {_e}", flush=True)
+                    chunks = []
+                else:
+                    time.sleep(3)
 
         buffer.extend(chunks)
         file_buffer.append(fname)

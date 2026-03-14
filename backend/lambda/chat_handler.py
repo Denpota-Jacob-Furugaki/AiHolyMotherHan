@@ -895,6 +895,7 @@ def generate_chat_response(
     message: str,
     context_chunks: List[Dict[str, Any]],
     language: str,
+    history: List[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     チャット応答を生成
@@ -903,13 +904,20 @@ def generate_chat_response(
     """
     system_prompt = build_system_prompt(language)
     user_prompt = build_user_prompt(message, context_chunks, language)
-    
+
+    # Build messages: system + up to last 6 history turns + current question
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for turn in history[-6:]:
+            role = turn.get("role", "")
+            content = turn.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_prompt})
+
     response = openai_request("chat/completions", {
         "model": CHAT_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": messages,
         "temperature": 0.7,
         "max_tokens": 600,
     })
@@ -1123,49 +1131,50 @@ def lambda_handler(event, context):
         # Bulk insert pre-translated chunks (internal use)
         # Body: {"message": "__insert_chunks__", "chunks": [{filename, s3_key, chunk_index, chunk_text, metadata}, ...]}
         if message == "__insert_chunks__":
+            import psycopg2.extras as _pg_extras
             chunks = body.get("chunks", [])
             if not chunks:
                 return {"statusCode": 400, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"error": "no chunks"})}
-            openai_key = get_openai_api_key()
+            # Only fetch OpenAI key if we need to embed
+            if chunks[0].get("embedding"):
+                embeddings = [c["embedding"] for c in chunks]
+            else:
+                openai_key = get_openai_api_key()
+                texts = [c.get("chunk_text") or c.get("text", "") for c in chunks]
+                embeddings = get_embeddings_batch(texts)
             conn = get_db_connection()
             cur = conn.cursor()
             inserted = 0
             errors = 0
             try:
-                # If chunks already have pre-computed embeddings, skip OpenAI call
-                if chunks[0].get("embedding"):
-                    embeddings = [c["embedding"] for c in chunks]
-                else:
-                    texts = [c.get("chunk_text") or c.get("text", "") for c in chunks]
-                    embeddings = get_embeddings_batch(texts)
+                rows = []
                 for chunk, emb in zip(chunks, embeddings):
-                    try:
-                        chunk_text = chunk.get("chunk_text") or chunk.get("text", "")
-                        emb_str = "[" + ",".join(map(str, emb)) + "]"
-                        s3_key = chunk.get("s3_key") or chunk.get("source_url") or chunk.get("filename", "")
-                        cur.execute("""
-                            INSERT INTO documents (s3_key, filename, chunk_index, chunk_text, metadata, embedding)
-                            VALUES (%s, %s, %s, %s, %s, %s::vector)
-                            ON CONFLICT (s3_key, chunk_index) DO UPDATE
-                              SET chunk_text = EXCLUDED.chunk_text,
-                                  metadata   = EXCLUDED.metadata,
-                                  embedding  = EXCLUDED.embedding
-                        """, (
-                            s3_key,
-                            chunk.get("filename", ""),
-                            chunk.get("chunk_index", 0),
-                            chunk_text,
-                            json.dumps(chunk.get("metadata", {})),
-                            emb_str,
-                        ))
-                        inserted += 1
-                    except Exception as e:
-                        errors += 1
-                        print(f"[Insert] row error: {e}")
+                    chunk_text = chunk.get("chunk_text") or chunk.get("text", "")
+                    emb_str = "[" + ",".join(map(str, emb)) + "]"
+                    s3_key = chunk.get("s3_key") or chunk.get("source_url") or chunk.get("filename", "")
+                    rows.append((
+                        s3_key,
+                        chunk.get("filename", ""),
+                        chunk.get("chunk_index", 0),
+                        chunk_text,
+                        json.dumps(chunk.get("metadata", {})),
+                        emb_str,
+                    ))
+                _pg_extras.execute_values(cur, """
+                    INSERT INTO documents (s3_key, filename, chunk_index, chunk_text, metadata, embedding)
+                    VALUES %s
+                    ON CONFLICT (s3_key, chunk_index) DO UPDATE
+                      SET chunk_text = EXCLUDED.chunk_text,
+                          metadata   = EXCLUDED.metadata,
+                          embedding  = EXCLUDED.embedding
+                """, rows, template="(%s, %s, %s, %s, %s, %s::vector)", page_size=len(rows))
+                inserted = len(rows)
                 conn.commit()
             except Exception as e:
-                errors += len(chunks)
+                errors = len(chunks)
                 print(f"[Insert] batch error: {e}")
+                try: conn.rollback()
+                except: pass
             finally:
                 cur.close()
                 conn.close()
@@ -1261,7 +1270,8 @@ def lambda_handler(event, context):
         
         _t2 = _time.time()
         # チャット応答生成
-        result = generate_chat_response(message, context_chunks, language)
+        history = body.get("history", [])
+        result = generate_chat_response(message, context_chunks, language, history)
         print(f"[Timing] Chat: {_time.time() - _t2:.1f}s")
 
         result["queries_used"] = limit_result["count"]

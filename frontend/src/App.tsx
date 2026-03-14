@@ -229,6 +229,12 @@ function App() {
     setIsLoading(true)
 
     try {
+      // Build conversation history (skip index-0 greeting, take last 6 turns)
+      const history = messages
+        .slice(1)
+        .slice(-6)
+        .map(m => ({ role: m.role, content: m.content }))
+
       const response = await fetch(`${API_ENDPOINT}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,6 +242,7 @@ function App() {
           message: userMessage,
           language,
           google_id_token: user.idToken,
+          history,
         }),
       })
 
