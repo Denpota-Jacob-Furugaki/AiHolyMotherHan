@@ -416,6 +416,7 @@ def generate_chat_response(
     message: str,
     context_chunks: List[Dict[str, Any]],
     language: str,
+    history: List[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     チャット応答を生成
@@ -427,14 +428,20 @@ def generate_chat_response(
     system_prompt = build_system_prompt(language)
     user_prompt = build_user_prompt(message, context_chunks, language)
     
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for turn in history[-6:]:
+            role = turn.get("role", "")
+            content = turn.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_prompt})
+
     response = client.chat.completions.create(
         model=CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.8,  # Slightly more creative for natural conversation
-        max_tokens=3000,  # Allow longer, more comprehensive responses
+        messages=messages,
+        temperature=0.8,
+        max_tokens=3000,
     )
     
     reply = response.choices[0].message.content
@@ -556,7 +563,53 @@ def lambda_handler(event, context):
         language = body.get("language", "en")
         top_k = body.get("top_k", DEFAULT_TOP_K)
         similarity_threshold = body.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
-        
+
+        # Internal: bulk insert pre-embedded chunks (no auth required)
+        if message == "__insert_chunks__":
+            from psycopg2.extras import execute_values as _execute_values
+            chunks = body.get("chunks", [])
+            if not chunks:
+                return {"statusCode": 400, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"error": "no chunks"})}
+            if chunks[0].get("embedding"):
+                embeddings = [c["embedding"] for c in chunks]
+            else:
+                client = get_openai_client()
+                texts = [c.get("chunk_text") or c.get("text", "") for c in chunks]
+                resp = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+                embeddings = [item.embedding for item in sorted(resp.data, key=lambda x: x.index)]
+            conn = get_db_connection()
+            cur = conn.cursor()
+            inserted = 0
+            errors = 0
+            try:
+                rows = []
+                for chunk, emb in zip(chunks, embeddings):
+                    chunk_text = chunk.get("chunk_text") or chunk.get("text", "")
+                    emb_str = "[" + ",".join(map(str, emb)) + "]"
+                    s3_key = chunk.get("s3_key") or chunk.get("source_url") or chunk.get("filename", "")
+                    rows.append((s3_key, chunk.get("filename", ""), chunk.get("chunk_index", 0),
+                                 chunk_text, json.dumps(chunk.get("metadata", {})), emb_str))
+                _execute_values(cur, """
+                    INSERT INTO documents (s3_key, filename, chunk_index, chunk_text, metadata, embedding)
+                    VALUES %s
+                    ON CONFLICT (s3_key, chunk_index) DO UPDATE
+                      SET chunk_text = EXCLUDED.chunk_text,
+                          metadata   = EXCLUDED.metadata,
+                          embedding  = EXCLUDED.embedding
+                """, rows, template="(%s, %s, %s, %s, %s, %s::vector)", page_size=len(rows))
+                inserted = len(rows)
+                conn.commit()
+            except Exception as e:
+                errors = len(chunks)
+                print(f"[Insert] batch error: {e}")
+                try: conn.rollback()
+                except: pass
+            finally:
+                cur.close()
+                conn.close()
+            print(f"[Insert] inserted={inserted} errors={errors}")
+            return {"statusCode": 200, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"inserted": inserted, "errors": errors})}
+
         # バリデーション
         if not message:
             return _error_response(400, "message is required")
@@ -608,8 +661,9 @@ def lambda_handler(event, context):
         
         print(f"[Chat] Found {len(context_chunks)} relevant chunks")
         
-        # チャット応答生成
-        result = generate_chat_response(message, context_chunks, language)
+        # チャット応答生成 (conversation history support)
+        history = body.get("history", [])
+        result = generate_chat_response(message, context_chunks, language, history)
         
         return {
             "statusCode": 200,

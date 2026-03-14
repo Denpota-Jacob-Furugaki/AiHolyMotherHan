@@ -33,8 +33,8 @@ EMBED_BATCH = 100        # texts per OpenAI call
 INSERT_BATCH = 30        # pre-embedded chunks per Lambda call
 SLEEP_BETWEEN = 0.05     # seconds between Lambda calls
 OPENAI_SECRET_ARN = "arn:aws:secretsmanager:ap-northeast-1:221646756615:secret:rag/openai-api-key-4Mrj6W"
-EMBEDDING_MODEL = "text-embedding-3-small"
-PROGRESS_FILE = "output/embed_bulk_progress.json"
+EMBEDDING_MODEL = "text-embedding-3-large"
+PROGRESS_FILE = "DatabaseFile/output/embed_bulk_progress.json"
 
 
 def get_openai_key() -> str:
