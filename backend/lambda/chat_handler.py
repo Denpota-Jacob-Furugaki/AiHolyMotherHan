@@ -28,10 +28,11 @@ def _get_dynamo_table():
 
 DAILY_QUERY_LIMIT = int(os.environ.get("DAILY_QUERY_LIMIT", "10"))
 ADMIN_EMAILS = {"denpotafurugaki@gmail.com"}
+UNLIMITED_EMAILS = {"denpotafurugaki@gmail.com", "tamuhika19990328@gmail.com"}
 
 
 def verify_google_token(id_token: str) -> Optional[dict]:
-    """Verify Google ID token; return {sub, email} or None."""
+    """Verify Google ID token; return {sub, email, name, picture} or None."""
     try:
         url = f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
         req = urllib.request.Request(url)
@@ -40,20 +41,27 @@ def verify_google_token(id_token: str) -> Optional[dict]:
         sub = data.get("sub")
         if not sub:
             return None
-        return {"sub": sub, "email": data.get("email", "")}
+        return {
+            "sub": sub,
+            "email": data.get("email", ""),
+            "name": data.get("name", ""),
+            "picture": data.get("picture", ""),
+        }
     except Exception as e:
         print(f"[Google] token verify failed: {e}")
         return None
 
 
-def check_and_increment_daily_limit(google_sub: str, email: str = "") -> dict:
-    """Check daily query limit. Returns {allowed, count, limit, unlimited}."""
-    if email in ADMIN_EMAILS:
+def check_and_increment_daily_limit(google_sub: str, email: str = "", name: str = "", picture: str = "") -> dict:
+    """Check daily query limit. Also stores user profile for admin dashboard.
+    Returns {allowed, count, limit, unlimited}."""
+    if email in UNLIMITED_EMAILS:
         return {"allowed": True, "count": 0, "limit": DAILY_QUERY_LIMIT, "unlimited": True}
     import datetime
     # JST = UTC+9
     now_jst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     today = now_jst.strftime("%Y-%m-%d")
+    now_iso = now_jst.strftime("%Y-%m-%dT%H:%M:%S+09:00")
     key = f"google:{google_sub}"
     table = _get_dynamo_table()
     try:
@@ -61,26 +69,72 @@ def check_and_increment_daily_limit(google_sub: str, email: str = "") -> dict:
         item = resp.get("Item")
         # Check unlimited flag (set when coupon is redeemed)
         if item and item.get("unlimited"):
+            # Still update last_active and profile info
+            update_expr = "SET last_active = :la"
+            expr_vals = {":la": now_iso}
+            if email:
+                update_expr += ", email = :e"
+                expr_vals[":e"] = email
+            if name:
+                update_expr += ", #n = :n"
+                expr_vals[":n"] = name
+            if picture:
+                update_expr += ", picture = :p"
+                expr_vals[":p"] = picture
+            expr_names = {"#n": "name"} if name else None
+            kwargs = {"Key": {"token": key}, "UpdateExpression": update_expr, "ExpressionAttributeValues": expr_vals}
+            if expr_names:
+                kwargs["ExpressionAttributeNames"] = expr_names
+            table.update_item(**kwargs)
             return {"allowed": True, "count": 0, "limit": DAILY_QUERY_LIMIT, "unlimited": True}
         if not item or item.get("query_date") != today:
-            # New day or first visit — start fresh
-            table.put_item(Item={
+            # New day or first visit — start fresh, store profile
+            new_item = {
                 "token": key,
                 "google_sub": google_sub,
                 "query_date": today,
                 "query_count": 1,
                 "active": True,
-            })
+                "last_active": now_iso,
+                "total_queries": int(item.get("total_queries", 0)) + 1 if item else 1,
+            }
+            if not item:
+                new_item["first_seen"] = now_iso
+            else:
+                new_item["first_seen"] = item.get("first_seen", now_iso)
+                # preserve unlimited flag
+                if item.get("unlimited"):
+                    new_item["unlimited"] = True
+            if email:
+                new_item["email"] = email
+            if name:
+                new_item["name"] = name
+            if picture:
+                new_item["picture"] = picture
+            table.put_item(Item=new_item)
             return {"allowed": True, "count": 1, "limit": DAILY_QUERY_LIMIT, "unlimited": False}
         count = int(item.get("query_count", 0))
         if count >= DAILY_QUERY_LIMIT:
             return {"allowed": False, "count": count, "limit": DAILY_QUERY_LIMIT, "unlimited": False}
         new_count = count + 1
-        table.update_item(
-            Key={"token": key},
-            UpdateExpression="SET query_count = :c",
-            ExpressionAttributeValues={":c": new_count},
-        )
+        total = int(item.get("total_queries", 0)) + 1
+        update_expr = "SET query_count = :c, total_queries = :t, last_active = :la"
+        expr_vals = {":c": new_count, ":t": total, ":la": now_iso}
+        expr_names = {}
+        if email:
+            update_expr += ", email = :e"
+            expr_vals[":e"] = email
+        if name:
+            update_expr += ", #n = :n"
+            expr_vals[":n"] = name
+            expr_names["#n"] = "name"
+        if picture:
+            update_expr += ", picture = :p"
+            expr_vals[":p"] = picture
+        kwargs = {"Key": {"token": key}, "UpdateExpression": update_expr, "ExpressionAttributeValues": expr_vals}
+        if expr_names:
+            kwargs["ExpressionAttributeNames"] = expr_names
+        table.update_item(**kwargs)
         return {"allowed": True, "count": new_count, "limit": DAILY_QUERY_LIMIT, "unlimited": False}
     except Exception as e:
         print(f"[Google] daily limit check failed: {e}")
@@ -173,18 +227,20 @@ def deduct_credit(token: str) -> int:
 # ============================================================
 
 SUPPORTED_LANGUAGES = {"en", "ja", "ko"}
-DEFAULT_TOP_K = int(os.environ.get("DEFAULT_TOP_K", "3"))  # Reduced for faster responses
+DEFAULT_TOP_K = int(os.environ.get("DEFAULT_TOP_K", "5"))
 DEFAULT_SIMILARITY_THRESHOLD = float(os.environ.get("DEFAULT_SIMILARITY_THRESHOLD", "0.7"))
 
 # 韓国語・日本語用の低い閾値（AIMessiah から適用）
 KOREAN_SIMILARITY_THRESHOLD = float(os.environ.get("KOREAN_SIMILARITY_THRESHOLD", "0.45"))
 KOREAN_FALLBACK_THRESHOLD = float(os.environ.get("KOREAN_FALLBACK_THRESHOLD", "0.35"))
-KOREAN_MIN_TOP_K = int(os.environ.get("KOREAN_MIN_TOP_K", "3"))  # Reduced for faster responses
+KOREAN_MIN_TOP_K = int(os.environ.get("KOREAN_MIN_TOP_K", "5"))
 JAPANESE_SIMILARITY_THRESHOLD = float(os.environ.get("JAPANESE_SIMILARITY_THRESHOLD", "0.45"))
 JAPANESE_FALLBACK_THRESHOLD = float(os.environ.get("JAPANESE_FALLBACK_THRESHOLD", "0.35"))
-JAPANESE_MIN_TOP_K = int(os.environ.get("JAPANESE_MIN_TOP_K", "3"))  # Reduced for faster responses
+JAPANESE_MIN_TOP_K = int(os.environ.get("JAPANESE_MIN_TOP_K", "5"))
 
 EMBEDDING_MODEL = "text-embedding-3-large"
+EMBEDDING_DIM = 3072
+SUBVEC_DIM = int(os.environ.get("SUBVEC_DIM", "512"))  # truncated dim for HNSW index
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gpt-4o")
 
 # ============================================================
@@ -751,12 +807,15 @@ def vector_search(
     他言語の関連コンテンツも含める。
     """
     import time as _time
+    d = SUBVEC_DIM  # use truncated dims to match HNSW index
     _db_start = _time.time()
     conn = get_db_connection()
     print(f"[DB] Connection established in {_time.time() - _db_start:.1f}s")
     try:
         cursor = conn.cursor()
-        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+        # Truncate query vector to d dims (OpenAI MRL supports truncation)
+        trunc = query_embedding[:d]
+        embedding_str = "[" + ",".join(map(str, trunc)) + "]"
         
         results = []
         seen_ids = set()
@@ -764,14 +823,14 @@ def vector_search(
         
         # 1. Search in requested language first
         same_lang_k = (top_k + 1) // 2
-        query_same_lang = """
+        query_same_lang = f"""
             SELECT 
                 id, s3_key, filename, chunk_index, chunk_text, metadata,
-                1 - (embedding <=> %s::vector) as similarity
+                1 - (subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})) as similarity
             FROM documents
             WHERE metadata->>'language' = %s
-            AND 1 - (embedding <=> %s::vector) >= %s
-            ORDER BY embedding <=> %s::vector
+            AND 1 - (subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})) >= %s
+            ORDER BY subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})
             LIMIT %s
         """
         _q1_start = _time.time()
@@ -788,13 +847,13 @@ def vector_search(
 
         # 2. Cross-language fallback — search all languages if not enough results
         if len(results) < 2:
-            cross_lang_query = """
+            cross_lang_query = f"""
                 SELECT 
                     id, s3_key, filename, chunk_index, chunk_text, metadata,
-                    1 - (embedding <=> %s::vector) as similarity
+                    1 - (subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})) as similarity
                 FROM documents
-                WHERE 1 - (embedding <=> %s::vector) >= %s
-                ORDER BY embedding <=> %s::vector
+                WHERE 1 - (subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})) >= %s
+                ORDER BY subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})
                 LIMIT %s
             """
             _q2_start = _time.time()
@@ -834,16 +893,28 @@ def vector_search(
 # プロンプト構築
 # ============================================================
 
-SYSTEM_PROMPT_TEMPLATE = """You are Mini-Han, a spiritual guide who teaches ONLY from the words and teachings of Reverend Sun Myung Moon and his wife Hak Ja Han Moon (True Parents). Respond in {language_name}.
+SYSTEM_PROMPT_TEMPLATE = """You are Mini-Han, a warm and compassionate spiritual guide who teaches from the words and teachings of Reverend Sun Myung Moon and his wife Hak Ja Han Moon (True Parents). Respond in {language_name}.
+
+YOUR ROLE:
+You are like a trusted elder sibling in faith — warm, understanding, and wise.
+When someone shares a personal worry or struggle (お悩み相談), FIRST empathize with their feelings, THEN gently guide them using True Parents' teachings.
 
 CRITICAL RULES — never break these:
-1. ONLY use the reference passages provided below the question. Do NOT use your general knowledge.
-2. If no relevant passage is provided, say: "I couldn't find a direct teaching on this in the provided texts. Please try rephrasing or ask about a related topic."
-3. NEVER give a neutral, relativistic, or secular answer. Always ground your reply in True Parents' teachings.
-4. NEVER say things like "some people believe" or "it's a personal decision" — give the clear teaching from the texts.
-5. Always cite the source (speech title and date) when quoting.
-6. Be warm and approachable, but never compromise the content of the teaching.
-7. For greetings and small talk, respond naturally. For all theological or ethical questions, rules 1–6 apply strictly.
+1. Base your answers on the reference passages provided below the question. You may synthesize and connect multiple passages to address the person's situation.
+2. If the passages are not directly about their question but contain relevant principles (about love, family, faith, purpose, relationships, forgiveness, etc.), apply those principles to their situation with practical guidance.
+3. If no passage is even remotely relevant, say so warmly and suggest related topics they could ask about.
+4. NEVER give a neutral, relativistic, or secular answer. Always ground your reply in True Parents' teachings.
+5. NEVER say things like "some people believe" or "it's a personal decision" — give the clear teaching from the texts.
+6. Always cite the source (speech title and date) when quoting.
+7. Be warm, empathetic, and approachable. For personal struggles, acknowledge the person's pain before teaching.
+8. For greetings and small talk, respond naturally and warmly.
+
+COUNSELING STYLE:
+- Start with empathy: acknowledge the person's feelings and situation
+- Share the relevant teaching from True Parents
+- Explain how the teaching applies to their specific situation
+- Offer concrete, practical guidance based on the teaching
+- End with encouragement and hope
 """
 
 LANGUAGE_NAMES = {
@@ -861,28 +932,90 @@ def build_system_prompt(language: str) -> str:
     )
 
 
+def _build_source_label(chunk: Dict, metadata: Dict) -> str:
+    """Build a rich source label for the LLM prompt so it can cite properly."""
+    import re as _re
+    parts = []
+    
+    # Document/book name
+    book = metadata.get("book_name") or metadata.get("book_name_en")
+    if book:
+        parts.append(f"Document: {book}")
+    
+    # Speech title
+    speech_title = metadata.get("speech_title_en") or metadata.get("speech_title")
+    if speech_title:
+        parts.append(f"Title: {speech_title}")
+    
+    # Author/speaker
+    author = metadata.get("author")
+    source_type = metadata.get("source_type", "")
+    if author:
+        parts.append(f"Speaker: {author}")
+    elif source_type in ("speech", "korean_pdf_translation"):
+        parts.append("Speaker: Rev. Sun Myung Moon (文鮮明先生)")
+    
+    # Date
+    date = metadata.get("speech_date")
+    if date:
+        parts.append(f"Date: {date}")
+    
+    # Location
+    location = metadata.get("speech_location")
+    if location:
+        parts.append(f"Location: {location}")
+    
+    # Chapter/section
+    chapter = metadata.get("chapter") or metadata.get("chapter_title")
+    section = metadata.get("section") or metadata.get("section_title")
+    if chapter:
+        parts.append(f"Chapter: {chapter}")
+    if section:
+        parts.append(f"Section: {section}")
+    
+    # Website
+    website = metadata.get("website")
+    url = metadata.get("url")
+    if website:
+        parts.append(f"Website: {website}")
+    if url:
+        parts.append(f"URL: {url}")
+    
+    # Language info
+    orig_lang = metadata.get("original_language")
+    lang = metadata.get("language", "")
+    if orig_lang and orig_lang != lang:
+        lang_names = {"ko": "Korean", "ja": "Japanese", "en": "English"}
+        parts.append(f"Originally in {lang_names.get(orig_lang, orig_lang)}, translated to {lang_names.get(lang, lang)}")
+    
+    # Fallback: parse filename for context
+    if not parts:
+        filename = chunk.get("filename", "unknown")
+        m = _re.match(r"\[JA-KO\]\s*(\d+)", filename)
+        if m:
+            parts.append(f"Document: 말씀選集 第{m.group(1)}巻 (Rev. Moon's Collected Speeches, Vol.{m.group(1)})")
+            parts.append("Speaker: Rev. Sun Myung Moon (文鮮明先生)")
+        else:
+            parts.append(f"Document: {filename.replace('.pdf', '')}")
+    
+    return " | ".join(parts)
+
+
 def build_user_prompt(message: str, context_chunks: List[Dict[str, Any]], language: str) -> str:
     parts = []
     for i, chunk in enumerate(context_chunks, 1):
         metadata = chunk.get("metadata", {})
-        title = (
-            metadata.get("speech_title_en")
-            or metadata.get("speech_title")
-            or metadata.get("book_name")
-            or chunk.get("filename", "unknown").replace(".pdf", "")
-        )
-        date = metadata.get("speech_date", "")
+        source_label = _build_source_label(chunk, metadata)
         text = chunk["chunk_text"][:1000]
-        source_line = f"Source: '{title}'"
-        if date:
-            source_line += f" ({date})"
-        parts.append(f"[Passage {i}]\n{source_line}\n{text}")
+        parts.append(f"[Passage {i}]\n{source_label}\n\n{text}")
     context = ("\n\n---\n\n").join(parts) if parts else "NO PASSAGES FOUND"
     return (
         f"User question: {message}\n\n"
         f"=== REFERENCE PASSAGES FROM TRUE PARENTS' TEACHINGS ===\n\n{context}\n\n"
         "=== END OF PASSAGES ===\n\n"
-        "Answer the question using ONLY the passages above. Quote directly where possible and cite the source. "
+        "Answer the question using ONLY the passages above.\n"
+        "When citing, always include: the document/speech name, speaker, date and location if available.\n"
+        "Format citations like: (Source: [Document Name], [Speaker], [Date], [Location])\n"
         "If the passages are not relevant, say so clearly."
     )
 
@@ -919,7 +1052,7 @@ def generate_chat_response(
         "model": CHAT_MODEL,
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 600,
+        "max_tokens": 900,
     })
     
     reply = response["choices"][0]["message"]["content"]
@@ -933,26 +1066,43 @@ def generate_chat_response(
         # ソースタイプに応じて表示名を構築
         display_name = _build_display_name(chunk, metadata, source_type)
         
+        # 著者/話者を推測
+        author = metadata.get("author")
+        if not author:
+            if source_type in ("speech", "korean_pdf_translation"):
+                author = "文鮮明先生 (Rev. Sun Myung Moon)"
+            elif metadata.get("book_name_en") == "Exposition of the Divine Principle":
+                author = "文鮮明先生 (Rev. Sun Myung Moon)"
+            elif "True Parents" in (metadata.get("book_name") or ""):
+                author = "True Parents"
+        
         sources.append({
             "index": i + 1,
             "filename": chunk.get("filename", "unknown"),
             "display_name": display_name,
             "source_type": source_type,
+            "author": author,
             # スピーチ用
             "speech_date": metadata.get("speech_date"),
             "speech_title": metadata.get("speech_title_en") or metadata.get("speech_title"),
             "speech_location": metadata.get("speech_location"),
             # 本・教科書用
             "book_name": metadata.get("book_name"),
+            "book_name_en": metadata.get("book_name_en"),
+            "book_name_ko": metadata.get("book_name_ko"),
             "chapter": metadata.get("chapter"),
+            "chapter_title": metadata.get("chapter_title"),
             "section": metadata.get("section"),
             "section_title": metadata.get("section_title"),
+            # Web用
+            "website": metadata.get("website"),
+            "url": metadata.get("url"),
             # 共通
             "s3_key": chunk.get("s3_key", ""),
             "language": metadata.get("language", "unknown"),
             "original_language": metadata.get("original_language"),
             "similarity": chunk.get("similarity", 0),
-            "excerpt": chunk.get("chunk_text", "")[:200] + "...",
+            "excerpt": chunk.get("chunk_text", "")[:300] + "...",
         })
     
     return {
@@ -964,6 +1114,7 @@ def generate_chat_response(
 
 def _build_display_name(chunk: Dict, metadata: Dict, source_type: str) -> str:
     """ソースタイプに応じた表示名を構築"""
+    import re as _re
     
     # 1. 本・教科書形式
     book_name = metadata.get("book_name")
@@ -981,32 +1132,77 @@ def _build_display_name(chunk: Dict, metadata: Dict, source_type: str) -> str:
             parts.append(section_title)
         return " ".join(parts)
     
+    # 1b. 本名だけある場合（章情報なし）
+    if book_name:
+        return book_name
+    
     # 2. スピーチ形式
     speech_date = metadata.get("speech_date")
     speech_title = metadata.get("speech_title_en") or metadata.get("speech_title")
     speech_location = metadata.get("speech_location")
     
-    if speech_date and speech_title:
-        display = f"{speech_date} - {speech_title}"
+    # Filter out junk titles like "0 Toc", "Toc", pure numbers, etc.
+    if speech_title and _re.match(r'^(\d+\s*)?[Tt]oc$|^\d+$', speech_title.strip()):
+        speech_title = None
+    
+    if speech_title:
+        display = speech_title
+        if speech_date:
+            display = f"{speech_date} — {display}"
+        if speech_location:
+            display += f" ({speech_location})"
+        return display
+    if speech_date:
+        display = f"True Parents' Speech ({speech_date})"
         if speech_location:
             display += f" ({speech_location})"
         return display
     
     # 3. 論文・記事形式
     author = metadata.get("author")
-    title = metadata.get("title")
+    title = metadata.get("title") or metadata.get("title_ko")
     
     if author and title:
-        return f"{author} - {title}"
+        return f"{author} — {title}"
+    if title:
+        return title
     
-    # 4. デフォルト: ファイル名
-    return chunk.get("filename", "unknown")
+    # 4. Web source
+    website = metadata.get("website")
+    url = metadata.get("url")
+    if website:
+        return f"{website}" + (f" ({url})" if url else "")
     
-    return {
-        "reply": reply,
-        "sources": sources,
-        "language": language,
-    }
+    # 5. ファイル名パターンから推測
+    filename = chunk.get("filename", "unknown")
+    
+    # [JA-KO] 189.pdf → 말씀選集 第189巻 (日本語訳)
+    m = _re.match(r"\[JA-KO\]\s*(\d+)", filename)
+    if m:
+        return f"말씀選集 第{m.group(1)}巻 (日本語訳)"
+    
+    # [JA] SomeTitle.pdf → SomeTitle (日本語訳)
+    m = _re.match(r"\[JA\]\s*(.+?)\.pdf", filename)
+    if m:
+        return f"{m.group(1).replace('_', ' ')} (日本語訳)"
+    
+    # [EN-KO] 189.pdf → 말씀選集 Vol.189 (English Translation)
+    m = _re.match(r"\[EN-KO\]\s*(\d+)", filename)
+    if m:
+        return f"Malssum Selection Vol.{m.group(1)} (English Translation)"
+    
+    # Number-only filenames like 189.pdf → 말씀選集 第189巻
+    m = _re.match(r"(\d+)\.pdf$", filename)
+    if m:
+        return f"말씀選集 第{m.group(1)}巻"
+    
+    # True Parents' Word Collection Vol.X
+    m = _re.search(r"True Parents.*Collection.*?(\d+)", filename, _re.IGNORECASE)
+    if m:
+        return f"True Parents' Word Collection Vol.{m.group(1)}"
+    
+    # Clean up .pdf extension for display
+    return filename.replace(".pdf", "").replace("_", " ")
 
 
 # ============================================================
@@ -1075,6 +1271,74 @@ def lambda_handler(event, context):
         except Exception as e:
             return {"statusCode": 500, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"success": False, "message": str(e)})}
 
+    # Route: /admin/dashboard
+    if "/admin/dashboard" in path:
+        try:
+            raw = event.get("body", "{}")
+            body = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            google_id_token = body.get("google_id_token", "")
+            if not google_id_token:
+                return _error_response(401, "Google sign-in required")
+            google_info = verify_google_token(google_id_token)
+            if not google_info:
+                return _error_response(401, "Invalid Google token")
+            if google_info.get("email") not in ADMIN_EMAILS:
+                return _error_response(403, "Admin access only")
+            # Scan DynamoDB for all google:* user entries
+            table = _get_dynamo_table()
+            users = []
+            scan_kwargs = {}
+            while True:
+                resp = table.scan(**scan_kwargs)
+                for item in resp.get("Items", []):
+                    tk = item.get("token", "")
+                    if not tk.startswith("google:"):
+                        continue
+                    users.append({
+                        "email": item.get("email", ""),
+                        "name": item.get("name", ""),
+                        "picture": item.get("picture", ""),
+                        "first_seen": item.get("first_seen", ""),
+                        "last_active": item.get("last_active", ""),
+                        "query_date": item.get("query_date", ""),
+                        "query_count": int(item.get("query_count", 0)),
+                        "total_queries": int(item.get("total_queries", 0)),
+                        "unlimited": bool(item.get("unlimited", False)),
+                    })
+                if "LastEvaluatedKey" not in resp:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+            # Sort by last_active descending
+            users.sort(key=lambda u: u.get("last_active", ""), reverse=True)
+            # Summary stats
+            import datetime as _dt
+            now_jst = _dt.datetime.utcnow() + _dt.timedelta(hours=9)
+            today = now_jst.strftime("%Y-%m-%d")
+            active_today = sum(1 for u in users if u.get("query_date") == today)
+            total_queries_today = sum(u.get("query_count", 0) for u in users if u.get("query_date") == today)
+            total_users = len(users)
+            total_queries_all = sum(u.get("total_queries", 0) for u in users)
+            unlimited_users = sum(1 for u in users if u.get("unlimited"))
+            dashboard = {
+                "summary": {
+                    "total_users": total_users,
+                    "active_today": active_today,
+                    "total_queries_today": total_queries_today,
+                    "total_queries_all": total_queries_all,
+                    "unlimited_users": unlimited_users,
+                    "date": today,
+                },
+                "users": users,
+            }
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+                "body": json.dumps(dashboard, ensure_ascii=False),
+            }
+        except Exception as e:
+            print(f"[Admin] dashboard error: {e}")
+            return _error_response(500, str(e))
+
     try:
         # リクエスト解析
         if isinstance(event.get("body"), str):
@@ -1088,54 +1352,12 @@ def lambda_handler(event, context):
         top_k = body.get("top_k", DEFAULT_TOP_K)
         similarity_threshold = body.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
 
-        # Google auth + daily limit check
-        if not google_id_token:
-            return _error_response(401, "Google sign-in required")
-
-        google_info = verify_google_token(google_id_token)
-        if not google_info:
-            return _error_response(401, "Invalid Google token")
-
-        google_sub = google_info["sub"]
-        google_email = google_info.get("email", "")
-        limit_result = check_and_increment_daily_limit(google_sub, google_email)
-        print(f"[Chat] google_sub={google_sub[:8]}... count={limit_result['count']}/{limit_result['limit']}")
-        if not limit_result["allowed"]:
-            return {
-                "statusCode": 429,
-                "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({
-                    "error": "daily_limit_reached",
-                    "count": limit_result["count"],
-                    "limit": limit_result["limit"],
-                }),
-            }
-        
-        # DB audit (internal use)
-        if message == "__audit__":
-            conn = get_db_connection()
-            cur = conn.cursor()
-            audit = {}
-            cur.execute("SELECT COUNT(*) FROM documents")
-            audit["total_chunks"] = cur.fetchone()[0]
-            cur.execute("SELECT metadata->>'language', COUNT(*) FROM documents GROUP BY 1 ORDER BY 2 DESC")
-            audit["by_language"] = {r[0]: r[1] for r in cur.fetchall()}
-            cur.execute("SELECT metadata->>'source_type', COUNT(*) FROM documents GROUP BY 1 ORDER BY 2 DESC")
-            audit["by_source_type"] = {r[0]: r[1] for r in cur.fetchall()}
-            cur.execute("SELECT DISTINCT filename FROM documents ORDER BY filename")
-            audit["indexed_files"] = [r[0] for r in cur.fetchall()]
-            cur.close()
-            conn.close()
-            return {"statusCode": 200, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps(audit, ensure_ascii=False)}
-
-        # Bulk insert pre-translated chunks (internal use)
-        # Body: {"message": "__insert_chunks__", "chunks": [{filename, s3_key, chunk_index, chunk_text, metadata}, ...]}
+        # Internal admin endpoints — bypass Google auth
         if message == "__insert_chunks__":
             import psycopg2.extras as _pg_extras
             chunks = body.get("chunks", [])
             if not chunks:
                 return {"statusCode": 400, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"error": "no chunks"})}
-            # Only fetch OpenAI key if we need to embed
             if chunks[0].get("embedding"):
                 embeddings = [c["embedding"] for c in chunks]
             else:
@@ -1181,19 +1403,63 @@ def lambda_handler(event, context):
             print(f"[Insert] inserted={inserted} errors={errors}")
             return {"statusCode": 200, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"inserted": inserted, "errors": errors})}
 
+        # Google auth + daily limit check
+        if not google_id_token:
+            return _error_response(401, "Google sign-in required")
+
+        google_info = verify_google_token(google_id_token)
+        if not google_info:
+            return _error_response(401, "Invalid Google token")
+
+        google_sub = google_info["sub"]
+        google_email = google_info.get("email", "")
+        google_name = google_info.get("name", "")
+        google_picture = google_info.get("picture", "")
+        limit_result = check_and_increment_daily_limit(google_sub, google_email, google_name, google_picture)
+        print(f"[Chat] google_sub={google_sub[:8]}... count={limit_result['count']}/{limit_result['limit']}")
+        if not limit_result["allowed"]:
+            return {
+                "statusCode": 429,
+                "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+                "body": json.dumps({
+                    "error": "daily_limit_reached",
+                    "count": limit_result["count"],
+                    "limit": limit_result["limit"],
+                }),
+            }
+        
+        # DB audit (internal use)
+        if message == "__audit__":
+            conn = get_db_connection()
+            cur = conn.cursor()
+            audit = {}
+            cur.execute("SELECT COUNT(*) FROM documents")
+            audit["total_chunks"] = cur.fetchone()[0]
+            cur.execute("SELECT metadata->>'language', COUNT(*) FROM documents GROUP BY 1 ORDER BY 2 DESC")
+            audit["by_language"] = {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute("SELECT metadata->>'source_type', COUNT(*) FROM documents GROUP BY 1 ORDER BY 2 DESC")
+            audit["by_source_type"] = {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute("SELECT DISTINCT filename FROM documents ORDER BY filename")
+            audit["indexed_files"] = [r[0] for r in cur.fetchall()]
+            cur.close()
+            conn.close()
+            return {"statusCode": 200, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": json.dumps(audit, ensure_ascii=False)}
+
         # Similarity probe (internal use) — message format: "__probe__:<query text>"
         if message.startswith("__probe__:"):
             probe_query = message[len("__probe__:"):]
             emb = get_embedding(probe_query)
-            emb_str = "[" + ",".join(map(str, emb)) + "]"
+            d = SUBVEC_DIM
+            trunc = emb[:d]
+            emb_str = "[" + ",".join(map(str, trunc)) + "]"
             conn = get_db_connection()
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(f"""
                 SELECT filename, metadata->>'language', metadata->>'source_type',
-                       1 - (embedding <=> %s::vector) as sim,
+                       1 - (subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})) as sim,
                        LEFT(chunk_text, 120)
                 FROM documents
-                ORDER BY embedding <=> %s::vector
+                ORDER BY subvector(embedding,1,{d})::vector({d}) <=> %s::vector({d})
                 LIMIT 10
             """, (emb_str, emb_str))
             rows = cur.fetchall()

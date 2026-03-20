@@ -11,8 +11,28 @@ type Language = 'en' | 'ja' | 'ko'
 interface Source {
   index: number
   filename: string
+  display_name: string
+  source_type: string
+  author?: string
+  // Speech
+  speech_date?: string
+  speech_title?: string
+  speech_location?: string
+  // Book
+  book_name?: string
+  book_name_en?: string
+  book_name_ko?: string
+  chapter?: string
+  chapter_title?: string
+  section?: string
+  section_title?: string
+  // Web
+  website?: string
+  url?: string
+  // Common
   s3_key: string
   language: string
+  original_language?: string
   similarity: number
   excerpt: string
 }
@@ -37,9 +57,59 @@ interface ChatResponse {
 interface GoogleUser {
   sub: string
   name: string
+  email?: string
   picture: string
   idToken: string
 }
+
+interface AdminUser {
+  email: string
+  name: string
+  picture: string
+  first_seen: string
+  last_active: string
+  query_date: string
+  query_count: number
+  total_queries: number
+  unlimited: boolean
+}
+
+interface AdminSummary {
+  total_users: number
+  active_today: number
+  total_queries_today: number
+  total_queries_all: number
+  unlimited_users: number
+  date: string
+}
+
+interface DashboardData {
+  summary: AdminSummary
+  users: AdminUser[]
+}
+
+const ADMIN_EMAILS = new Set(['denpotafurugaki@gmail.com'])
+
+// ============================================================
+// In-app browser detection
+// ============================================================
+
+function isInAppBrowser(): boolean {
+  const ua = navigator.userAgent || navigator.vendor || ''
+  // LINE, Facebook, Instagram, Twitter/X, WeChat, KakaoTalk, NAVER, etc.
+  return /Line\//i.test(ua)
+    || /FBAN|FBAV/i.test(ua)
+    || /Instagram/i.test(ua)
+    || /Twitter|X\.com/i.test(ua)
+    || /MicroMessenger/i.test(ua)
+    || /KAKAOTALK/i.test(ua)
+    || /NAVER/i.test(ua)
+    || /Snapchat/i.test(ua)
+    || /Discord/i.test(ua)
+    || (/wv\)/i.test(ua) && /Android/i.test(ua))
+}
+
+const IN_APP = isInAppBrowser()
 
 // ============================================================
 // Constants
@@ -154,9 +224,13 @@ function App() {
   const [showCouponModal, setShowCouponModal] = useState(false)
   const [couponInput, setCouponInput] = useState('')
   const [couponStatus, setCouponStatus] = useState<'idle' | 'loading' | 'success' | 'invalid' | 'error'>('idle')
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
+  const [dashboardLoading, setDashboardLoading] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const t = TEXTS[language]
+  const isAdmin = user?.email ? ADMIN_EMAILS.has(user.email) : false
 
   // Set greeting on language or login state change
   useEffect(() => {
@@ -174,10 +248,14 @@ function App() {
     if (!idToken) return
     // Decode JWT payload (no verification needed on client)
     try {
-      const payload = JSON.parse(atob(idToken.split('.')[1]))
+      const base64 = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+      const binary = atob(base64)
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+      const payload = JSON.parse(new TextDecoder().decode(bytes))
       const googleUser: GoogleUser = {
         sub: payload.sub,
         name: payload.name || payload.email,
+        email: payload.email || '',
         picture: payload.picture || '',
         idToken,
       }
@@ -296,6 +374,38 @@ function App() {
     }
   }
 
+  const fetchDashboard = async () => {
+    if (!user || !isAdmin) return
+    setDashboardLoading(true)
+    try {
+      const res = await fetch(`${API_ENDPOINT}/admin/dashboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ google_id_token: user.idToken }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data: DashboardData = await res.json()
+      setDashboardData(data)
+    } catch (e) {
+      console.error('Dashboard fetch failed', e)
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
+
+  const openAdmin = () => {
+    setShowAdmin(true)
+    fetchDashboard()
+  }
+
+  const formatDate = (iso: string) => {
+    if (!iso) return '—'
+    try {
+      const d = new Date(iso)
+      return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    } catch { return iso }
+  }
+
   const isBlocked = !user
 
   return (
@@ -332,6 +442,7 @@ function App() {
               {!isUnlimited && (
                 <button className="coupon-btn" onClick={() => { setShowCouponModal(true); setCouponStatus('idle') }}>{t.couponBtn}</button>
               )}
+              {isAdmin && <button className="coupon-btn" onClick={openAdmin}>📊 Admin</button>}
               <button className="sign-out-btn" onClick={handleSignOut}>{t.signOut}</button>
             </div>
           ) : null}
@@ -352,8 +463,16 @@ function App() {
                     {msg.sources.map(source => (
                       <div key={source.index} className="source-item">
                         <span className="source-badge">[{source.index}]</span>
-                        <span className="source-filename">{source.filename}</span>
-                        <span className="source-lang">({source.language})</span>
+                        <div className="source-details">
+                          <span className="source-display-name">{source.display_name || source.filename}</span>
+                          <div className="source-meta">
+                            {source.author && <span className="source-author">👤 {source.author}</span>}
+                            {source.speech_date && <span className="source-date">📅 {source.speech_date}</span>}
+                            {source.speech_location && <span className="source-location">📍 {source.speech_location}</span>}
+                            {source.chapter && <span className="source-chapter">{source.chapter}{source.section_title ? ` — ${source.section_title}` : ''}</span>}
+                            <span className="source-lang">{source.language === 'ja' ? '🇯🇵' : source.language === 'ko' ? '🇰🇷' : '🇺🇸'} {source.language}{source.original_language && source.original_language !== source.language ? ` (← ${source.original_language})` : ''}</span>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -378,6 +497,40 @@ function App() {
       {/* 入力エリア */}
       <footer className="input-area">
         {!user ? (
+          IN_APP ? (
+            <div className="inapp-warning">
+              <div className="inapp-icon">🌐</div>
+              <p className="inapp-title">
+                {language === 'ja' ? 'ブラウザで開いてください' : language === 'ko' ? '브라우저에서 열어주세요' : 'Please open in your browser'}
+              </p>
+              <p className="inapp-body">
+                {language === 'ja'
+                  ? 'アプリ内ブラウザではGoogleログインが使えません。Safari / Chromeで開いてください。'
+                  : language === 'ko'
+                  ? '앱 내 브라우저에서는 Google 로그인이 불가합니다. Safari / Chrome에서 열어주세요.'
+                  : 'Google Sign-In is blocked in in-app browsers. Please open this page in Safari or Chrome.'}
+              </p>
+              <div className="inapp-buttons">
+                <button className="inapp-btn" onClick={() => {
+                  navigator.clipboard?.writeText(window.location.href)
+                    .then(() => alert(language === 'ja' ? 'URLをコピーしました！ブラウザに貼り付けてください。' : language === 'ko' ? 'URL이 복사되었습니다! 브라우저에 붙여넣으세요.' : 'URL copied! Paste it in your browser.'))
+                    .catch(() => alert(window.location.href))
+                }}>
+                  {language === 'ja' ? '📋 URLをコピー' : language === 'ko' ? '📋 URL 복사' : '📋 Copy URL'}
+                </button>
+                <a className="inapp-btn inapp-btn-primary" href={`intent://${window.location.host}${window.location.pathname}#Intent;scheme=https;package=com.android.chrome;end`}
+                   onClick={(e) => {
+                     // For iOS, try opening in Safari via a trick
+                     if (/iPhone|iPad/i.test(navigator.userAgent)) {
+                       e.preventDefault()
+                       window.location.href = window.location.href
+                     }
+                   }}>
+                  {language === 'ja' ? '🚀 ブラウザで開く' : language === 'ko' ? '🚀 브라우저에서 열기' : '🚀 Open in Browser'}
+                </a>
+              </div>
+            </div>
+          ) : (
           <div className="signin-area">
             <GoogleLogin
               onSuccess={handleLoginSuccess}
@@ -388,6 +541,7 @@ function App() {
               size="large"
             />
           </div>
+          )
         ) : (
           <>
             <textarea
@@ -421,6 +575,83 @@ function App() {
             <button className="sign-out-btn" style={{marginTop: '0.5rem', width: '100%', textAlign: 'center'}} onClick={() => setShowLimitModal(false)}>
               {t.limitClose}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Admin dashboard modal */}
+      {showAdmin && isAdmin && (
+        <div className="modal-overlay" onClick={() => setShowAdmin(false)}>
+          <div className="modal admin-modal" onClick={e => e.stopPropagation()}>
+            <div className="admin-header">
+              <h2>📊 Admin Dashboard</h2>
+              <button className="admin-close" onClick={() => setShowAdmin(false)}>✕</button>
+            </div>
+            {dashboardLoading ? (
+              <div className="admin-loading">Loading...</div>
+            ) : dashboardData ? (
+              <>
+                <div className="admin-summary">
+                  <div className="admin-card">
+                    <div className="admin-card-value">{dashboardData.summary.total_users}</div>
+                    <div className="admin-card-label">Total Users</div>
+                  </div>
+                  <div className="admin-card">
+                    <div className="admin-card-value">{dashboardData.summary.active_today}</div>
+                    <div className="admin-card-label">Active Today</div>
+                  </div>
+                  <div className="admin-card">
+                    <div className="admin-card-value">{dashboardData.summary.total_queries_today}</div>
+                    <div className="admin-card-label">Queries Today</div>
+                  </div>
+                  <div className="admin-card">
+                    <div className="admin-card-value">{dashboardData.summary.total_queries_all}</div>
+                    <div className="admin-card-label">Total Queries</div>
+                  </div>
+                  <div className="admin-card">
+                    <div className="admin-card-value">{dashboardData.summary.unlimited_users}</div>
+                    <div className="admin-card-label">Unlimited Users</div>
+                  </div>
+                </div>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>User</th>
+                        <th>First Seen</th>
+                        <th>Last Active</th>
+                        <th>Today</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardData.users.map((u, i) => (
+                        <tr key={i}>
+                          <td>{u.picture ? <img src={u.picture} alt="" className="admin-avatar" /> : '👤'}</td>
+                          <td>
+                            <div className="admin-user-name">{u.name || '—'}</div>
+                            <div className="admin-user-email">{u.email || '—'}</div>
+                          </td>
+                          <td>{formatDate(u.first_seen)}</td>
+                          <td>{formatDate(u.last_active)}</td>
+                          <td>{u.query_date === dashboardData.summary.date ? u.query_count : 0}</td>
+                          <td>{u.total_queries}</td>
+                          <td>{u.unlimited ? <span className="admin-badge-unlimited">Unlimited</span> : <span className="admin-badge-free">Free</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="admin-footer">
+                  <button className="coupon-btn" onClick={fetchDashboard} disabled={dashboardLoading}>🔄 Refresh</button>
+                  <span className="admin-date">Date: {dashboardData.summary.date} (JST)</span>
+                </div>
+              </>
+            ) : (
+              <div className="admin-loading">Failed to load dashboard</div>
+            )}
           </div>
         </div>
       )}
