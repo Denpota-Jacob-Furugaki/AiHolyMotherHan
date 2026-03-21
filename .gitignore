@@ -8,6 +8,7 @@ output/
 malsm_pdfs/
 tparents_pdfs/
 data/
+!data/youtube/
 
 # Large binary files
 *.zip
